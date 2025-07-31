@@ -1,0 +1,25 @@
+# Azure App Service Configuration
+# Set these environment variables in Azure Portal -> Configuration
+
+# Application Settings
+USE_UNICODE=false
+ENVIRONMENT=production
+LOG_LEVEL=INFO
+DISABLE_UNICODE=true
+
+# H&M Data Settings
+OPENAI_API_KEY=your-openai-key-here
+GCP_PROJECT_ID=your-gcp-project
+BQ_DATASET=your-dataset
+BQ_TABLES=incidents,problems
+
+# Azure Storage (if using)
+AZURE_STORAGE_CONNECTION_STRING=your-connection-string
+AZURE_SCHEMA_CONTAINER=schemas
+
+# Performance Settings
+MAX_QUERY_LENGTH=500
+TIMEOUT_SECONDS=30
+
+# Startup Command (if needed)
+# python app.py
