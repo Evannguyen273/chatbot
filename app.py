@@ -5,9 +5,11 @@ import sys
 import os
 from typing import Dict, Any
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import jwt
+from functools import wraps
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -355,12 +357,63 @@ def run_flask_api(assistant: DataAssistant):
     app = Flask(__name__)
     CORS(app)
     
+    # Simple secret key for JWT - in production, use environment variable
+    SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
+    
+    def require_auth(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            token = request.headers.get('Authorization')
+            if not token:
+                return jsonify({'error': 'No token provided'}), 401
+            
+            try:
+                # Remove 'Bearer ' prefix if present
+                if token.startswith('Bearer '):
+                    token = token[7:]
+                
+                # Decode token
+                payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+                request.user_id = payload['user_id']
+                
+            except jwt.InvalidTokenError:
+                return jsonify({'error': 'Invalid token'}), 401
+            except Exception as e:
+                return jsonify({'error': 'Token validation failed'}), 401
+            
+            return f(*args, **kwargs)
+        return decorated
+    
+    @app.route('/login', methods=['POST'])
+    def login():
+        """Simple login endpoint - generates JWT token"""
+        data = request.json
+        username = data.get('username')
+        password = data.get('password')
+        
+        # Simple validation - in production, integrate with your auth system
+        if username and password:
+            # Generate token
+            token = jwt.encode({
+                'user_id': username,
+                'exp': datetime.utcnow() + timedelta(hours=24)
+            }, SECRET_KEY, algorithm='HS256')
+            
+            return jsonify({
+                'token': token,
+                'user_id': username,
+                'expires_in': 86400  # 24 hours
+            })
+        else:
+            return jsonify({'error': 'Username and password required'}), 400
+    
     @app.route('/query', methods=['POST'])
+    @require_auth
     def query():
-        """Main query endpoint - matches your legacy API"""
+        """Main query endpoint - with authentication"""
         data = request.json
         user_input = data.get('user_query')
-        user_id = data.get('user_id')
+        user_id = request.user_id  # Get from authenticated token
         
         # Process query through new workflow
         result = assistant.process_query(user_input, user_id)
@@ -373,10 +426,11 @@ def run_flask_api(assistant: DataAssistant):
         })
     
     @app.route('/feedback', methods=['POST'])
+    @require_auth
     def feedback():
-        """Feedback endpoint - matches your legacy API"""
+        """Feedback endpoint - with authentication"""
         data = request.json
-        user_id = data.get('user_id')
+        user_id = request.user_id  # Get from authenticated token
         user_query = data.get('user_query')
         feedback_type = data.get('feedback')
         comments = data.get('comments')
@@ -395,10 +449,10 @@ def run_flask_api(assistant: DataAssistant):
         }), 200
     
     @app.route('/finish', methods=['POST'])
+    @require_auth
     def finish():
-        """Finish conversation endpoint - saves session to blob storage"""
-        data = request.json
-        user_id = data.get('user_id')
+        """Finish conversation endpoint - with authentication"""
+        user_id = request.user_id  # Get from authenticated token
         
         if user_id and assistant.session_manager and assistant.use_blob_sessions:
             try:
@@ -429,16 +483,25 @@ def run_flask_api(assistant: DataAssistant):
             }), 200
     
     @app.route('/get_conversation', methods=['GET'])
+    @require_auth
     def get_conversation():
-        """Get conversation data endpoint - matches your legacy API"""
+        """Get conversation data endpoint - with authentication"""
         return jsonify({"result": assistant.get_conversation_data()})
+    
+    # Health check endpoint (no auth required)
+    @app.route('/health', methods=['GET'])
+    def health():
+        """Health check endpoint"""
+        return jsonify({"status": "healthy", "timestamp": datetime.utcnow().isoformat()})
     
     print("🚀 Starting Flask API server...")
     print("📡 API Endpoints:")
-    print("   POST /query - Process user queries")
-    print("   POST /feedback - Record user feedback")
-    print("   POST /finish - End conversation session")
-    print("   GET /get_conversation - Get all conversation data")
+    print("   POST /login - Get authentication token")
+    print("   POST /query - Process user queries (auth required)")
+    print("   POST /feedback - Record user feedback (auth required)")
+    print("   POST /finish - End conversation session (auth required)")
+    print("   GET /get_conversation - Get all conversation data (auth required)")
+    print("   GET /health - Health check (no auth)")
     
     app.run(debug=True, host='0.0.0.0', port=5000)
 
